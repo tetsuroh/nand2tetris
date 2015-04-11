@@ -12,7 +12,11 @@ comment = do
   many $ noneOf "\n"
   char '\n'
   return ()
-    
+
+-- \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_
+-- Arithmetic commands
+-- \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_
+  
 add :: Parser ArithmeticCommand
 add = string "add" *> return Add
 
@@ -51,6 +55,10 @@ arithmeticCommand = try add <|>
                     Language.Hack.VM.Parser.or <|>
                     Language.Hack.VM.Parser.not
 
+-- \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_
+-- Stack commands
+-- \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_
+                            
 argument :: Parser MemorySegment
 argument = string "argument" >> return Argument
 
