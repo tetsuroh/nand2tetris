@@ -21,13 +21,19 @@ data MemorySegment = Argument
                    | Temp
                      deriving (Show, Read, Eq)
 
+data ProgramFlow = Label String
+                 | Goto String
+                 | IfGoto String
+                   deriving (Show, Read, Eq)
+
 data StackOperation = Push MemorySegment Int
                     | Pop  MemorySegment Int
                       deriving (Show, Read, Eq)
 
 data HackVMCommand = ArithmeticCommand ArithmeticCommand
                    | StackOperation StackOperation
+                   | ProgramFlow ProgramFlow
                      deriving (Show, Read, Eq)
 
 data HackVML = HackVML [HackVMCommand]
-             deriving (Show, Read, Eq)
+               deriving (Show, Read, Eq)

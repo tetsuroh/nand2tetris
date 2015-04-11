@@ -5,6 +5,7 @@ import Text.Parsec.String
 import Control.Applicative ((<$>), (<*>), (<*), (*>))
 
 import Language.Hack.VM.Types
+import Language.Hack.VM.Lexer (symbol)
 
 comment :: Parser ()
 comment = do
@@ -114,15 +115,50 @@ pop = do
 stackOperation :: Parser StackOperation
 stackOperation = try push <|> pop
 
+-- \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_
+-- Label commands
+-- \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_
+
+label :: Parser ProgramFlow
+label = do
+  string "label"
+  spaces
+  label_ <- symbol
+  return . Label $ label_
+
+goto :: Parser ProgramFlow
+goto = do
+  string "goto"
+  spaces
+  label_ <- symbol
+  return . Goto $ label_
+
+ifGoto :: Parser ProgramFlow
+ifGoto = do
+  string "if-goto"
+  spaces
+  label_ <- symbol
+  return . IfGoto $ label_
+
+programFlow :: Parser ProgramFlow
+programFlow = label <|> goto <|> ifGoto
+    
+-- \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_
+-- Hack commands
+-- \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_
+
 parserHackVM :: Parser [HackVMCommand]
 parserHackVM = do 
   skipMany spaceOrComment
-  sepEndBy (a <|> s) (skipMany spaceOrComment)
+  sepEndBy (a <|> p <|> s) (skipMany spaceOrComment)
       where
         spaceOrComment = (space >> return ()) <|> comment
         a = do
           ac <- try arithmeticCommand
           return $ ArithmeticCommand ac
+        p = do
+          pf <- try programFlow
+          return . ProgramFlow $ pf
         s = do
           so <- stackOperation
           return $ StackOperation so
