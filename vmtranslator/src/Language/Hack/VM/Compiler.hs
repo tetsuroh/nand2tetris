@@ -29,8 +29,9 @@ compile (HackVML vml) filename = case runRWS (compile' vml) filename 0 of
     where
       compile' :: [HackVMCommand] -> CodeWriter String
       compile' [] = return ""
-      compile' (StackOperation c:cs)    = go stack c cs
+      compile' (StackOperation    c:cs) = go stack c cs
       compile' (ArithmeticCommand c:cs) = go arithmetic c cs
+      compile' (ProgramFlow       c:cs) = go programFlow c cs
       go f c cs = do
         e1 <- f c
         e2 <- compile' cs
@@ -81,6 +82,11 @@ arithmetic And = return $ popD ++ popM ++ "D=D&M\n" ++ pushD
 arithmetic Or  = return $ popD ++ popM ++ "D=D|M\n" ++ pushD
 arithmetic Not = return $ popM ++ "D=!M\n" ++ pushD
 
+programFlow :: ProgramFlow -> CodeWriter String
+programFlow (Label  s) = return $ "(" ++ s ++ ")"
+programFlow (Goto   s) = return $ unlines ["@" ++ s, "0;JMP"]
+programFlow (IfGoto s) = return $ popD ++ unlines ["@" ++ s, "D;JNE"]
+                 
 segmentToLabel :: MemorySegment -> String
 segmentToLabel Argument = "ARG"
 segmentToLabel Local    = "LCL"

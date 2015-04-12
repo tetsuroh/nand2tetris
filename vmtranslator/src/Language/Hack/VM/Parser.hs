@@ -1,6 +1,6 @@
 module Language.Hack.VM.Parser where
 
-import Text.Parsec
+import Text.Parsec hiding (label)
 import Text.Parsec.String
 import Control.Applicative ((<$>), (<*>), (<*), (*>))
 

@@ -7,5 +7,5 @@ import Text.Parsec.String
 symbol :: Parser String
 symbol = do
   c <- letter <|> oneOf ".:_"
-  cs <- many alphaNum
+  cs <- many (alphaNum  <|> oneOf ".:_")
   return $ c:cs
