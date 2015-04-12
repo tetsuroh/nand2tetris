@@ -1,6 +1,7 @@
 module Language.Hack.VM.Compiler (compile) where
 
 import Control.Monad.RWS (RWS, runRWS, get, put, modify, tell, ask)
+import Control.Monad (forM)
 import Prelude hiding (compare)
 
 import Codec.Hack.Types (Jump(..))
@@ -18,10 +19,35 @@ getVariableCout = do
   modify (+1)
   return c
 
+getNewLabelName :: String -> CodeWriter String
+getNewLabelName s  = do
+  fn <- getFilename
+  v  <- getVariableCout
+  return $ fn ++ ":" ++ s ++ ":label" ++ show v
+
+getValueWithOffsetD :: String -> Int -> String
+getValueWithOffsetD s o = unlines ["@" ++ s
+                                  ,"D=M"
+                                  ,init setAddress
+                                  ,"D=M"]
+    where
+      setAddress = if o < 0 then
+                       unlines ["@" ++ show (o*(-1))
+                               ,"A=D-A"]
+                   else
+                       unlines ["@" ++ show o
+                               ,"A=D+A"]
+
 getStaticVariableName :: Int -> CodeWriter String
 getStaticVariableName i = do
   fileName <- getFilename
   return $ fileName ++ "." ++ show i
+
+(<++>) :: CodeWriter String -> CodeWriter String -> CodeWriter String
+a <++> b = do
+  a' <- a
+  b' <- b
+  return $ a' ++ b'
                
 compile :: HackVML -> String -> String
 compile (HackVML vml) filename = case runRWS (compile' vml) filename 0 of
@@ -32,6 +58,7 @@ compile (HackVML vml) filename = case runRWS (compile' vml) filename 0 of
       compile' (StackOperation    c:cs) = go stack c cs
       compile' (ArithmeticCommand c:cs) = go arithmetic c cs
       compile' (ProgramFlow       c:cs) = go programFlow c cs
+      compile' (FunctionCall      c:cs) = go functionCall c cs
       go f c cs = do
         e1 <- f c
         e2 <- compile' cs
@@ -83,21 +110,65 @@ arithmetic Or  = return $ popD ++ popM ++ "D=D|M\n" ++ pushD
 arithmetic Not = return $ popM ++ "D=!M\n" ++ pushD
 
 programFlow :: ProgramFlow -> CodeWriter String
-programFlow (Label  s) = return $ "(" ++ s ++ ")"
+programFlow (Label  s) = return $ "(" ++ s ++ ")\n"
 programFlow (Goto   s) = return $ unlines ["@" ++ s, "0;JMP"]
 programFlow (IfGoto s) = return $ popD ++ unlines ["@" ++ s, "D;JNE"]
                  
+functionCall :: FunctionCall -> CodeWriter String
+-- | function f k
+--     repeat k times:
+--     push 0            // Initialize local variables
+functionCall (Function f n) = programFlow (Label f) <++>
+                              fmap concat (forM [0..n-1] $ \x ->
+                                  return ("// Init " ++ show x ++ "\n") <++>
+                                  stack (Push Constant 0) <++>
+                                  stack (Pop Local x) <++>
+                                  return (unlines ["@SP// incr", "M=M+1"])
+                                          )
+functionCall (Call     f n) = undefined
+functionCall Return         = return "// return \n" <++>
+                              -- R13 = return address
+                              getValueWithOffset (segmentToLabel Local) (-5) <++>
+                              storeValue "R13" <++>
+                              -- *ARG = pop() // pop result of function for callee
+                              stack (Pop Argument 0) <++>
+                              -- SP = ARG + 1
+                              setStackPointer <++>
+                              substitute That Local (-1) <++>
+                              substitute This Local (-2) <++>
+                              substitute Argument Local (-3) <++>
+                              substitute Local Local (-4) <++>
+                              gotoReturnAddress
+    where
+      getValueWithOffset v n = return $ getValueWithOffsetD v n
+      storeValue v = return $ storeValueD v
+      substitute' seg = return $ unlines ["@" ++ seg
+                                        ,"M=D"]
+      substitute seg v n = getValueWithOffset (segmentToLabel v) n <++> 
+                           substitute' (segmentToLabel seg)
+      setStackPointer = return $ unlines ["@ARG"
+                                         ,"D=M"
+                                         ,"@SP"
+                                         ,"M=D+1"]
+      gotoReturnAddress = getValueWithOffset "R13" 0 <++>
+                          return (unlines ["0;JMP"])
+
 segmentToLabel :: MemorySegment -> String
 segmentToLabel Argument = "ARG"
 segmentToLabel Local    = "LCL"
 segmentToLabel This     = "THIS"
 segmentToLabel That     = "THAT"
+segmentToLabel Temp     = "R5"
 segmentToLabel segment  = error $ "Unexpected segment to label: " ++ show segment
 
 baseAddress :: MemorySegment -> Int
 baseAddress Pointer  = 3
 baseAddress Temp     = 5
 baseAddress segment  = error $ "Unexpected segment to address: " ++ show segment
+
+storeValueD :: String -> String
+storeValueD s = unlines ["@" ++ s
+                       ,"M=D"]
 
 pushA :: Int -> String
 pushA n = unlines ["@" ++ show n

@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 module Language.Hack.VM.Parser where
 
 import Text.Parsec hiding (label)
@@ -142,7 +143,37 @@ ifGoto = do
 
 programFlow :: Parser ProgramFlow
 programFlow = label <|> goto <|> ifGoto
-    
+              
+-- \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_
+-- Function call commands
+-- \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_
+
+functionCall :: Parser FunctionCall
+functionCall = function <|> call <|> ret
+    where
+      function :: Parser FunctionCall
+      function = do
+        string "function"
+        spaces
+        functionName <- symbol
+        spaces
+        localVariableLength <- many1 digit
+        return $ Function functionName (read localVariableLength)
+
+      call :: Parser FunctionCall
+      call = do
+        string "call"
+        spaces
+        functionName <- symbol
+        spaces
+        argumentLength <- many1 digit
+        return $ Call functionName (read argumentLength)
+
+      ret :: Parser FunctionCall
+      ret = do
+        string "return"
+        return Return
+
 -- \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_
 -- Hack commands
 -- \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_
@@ -150,18 +181,14 @@ programFlow = label <|> goto <|> ifGoto
 parserHackVM :: Parser [HackVMCommand]
 parserHackVM = do 
   skipMany spaceOrComment
-  sepEndBy (a <|> p <|> s) (skipMany spaceOrComment)
+  sepEndBy (a <|> p <|> f <|> s) (skipMany spaceOrComment)
       where
         spaceOrComment = (space >> return ()) <|> comment
-        a = do
-          ac <- try arithmeticCommand
-          return $ ArithmeticCommand ac
-        p = do
-          pf <- try programFlow
-          return . ProgramFlow $ pf
-        s = do
-          so <- stackOperation
-          return $ StackOperation so
+        a = ArithmeticCommand <$> try arithmeticCommand
+        p = ProgramFlow <$> try programFlow
+        f = FunctionCall <$> try functionCall
+        s = StackOperation <$> stackOperation
+
 
 parseHackVM :: String -> String -> Either ParseError HackVML
 parseHackVM n s = fmap HackVML $ parse parserHackVM n s

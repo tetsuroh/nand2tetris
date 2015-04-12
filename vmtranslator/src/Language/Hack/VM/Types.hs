@@ -38,6 +38,7 @@ data FunctionCall = Function String Int
 data HackVMCommand = ArithmeticCommand ArithmeticCommand
                    | StackOperation StackOperation
                    | ProgramFlow ProgramFlow
+                   | FunctionCall FunctionCall
                      deriving (Show, Read, Eq)
 
 data HackVML = HackVML [HackVMCommand]
