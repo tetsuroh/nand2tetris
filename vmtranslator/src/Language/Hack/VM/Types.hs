@@ -30,6 +30,11 @@ data StackOperation = Push MemorySegment Int
                     | Pop  MemorySegment Int
                       deriving (Show, Read, Eq)
 
+data FunctionCall = Function String Int
+                  | Call     String Int
+                  | Return
+                    deriving (Show, Read, Eq)
+
 data HackVMCommand = ArithmeticCommand ArithmeticCommand
                    | StackOperation StackOperation
                    | ProgramFlow ProgramFlow
