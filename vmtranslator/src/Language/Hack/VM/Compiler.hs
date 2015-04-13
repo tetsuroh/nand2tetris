@@ -8,22 +8,34 @@ import Codec.Hack.Types (Jump(..))
 import Language.Hack.VM.Types
 import Language.Hack.VM.Parser (parseHackVM)
     
-type CodeWriter a = RWS String () Int a
+newtype CodeWriterState = CodeWriterState (String, Int)
     
+type CodeWriter a = RWS String () CodeWriterState a
+
 getFilename :: CodeWriter String
 getFilename = ask
 
 getVariableCout :: CodeWriter Int
 getVariableCout = do
-  c <- get
-  modify (+1)
-  return c
+  (CodeWriterState (f, n)) <- get
+  put (CodeWriterState (f, n+1))
+  return n
 
 getNewLabelName :: String -> CodeWriter String
 getNewLabelName s  = do
   fn <- getFilename
   v  <- getVariableCout
   return $ fn ++ ":" ++ s ++ ":label" ++ show v
+
+getCurrentFunctionName :: CodeWriter String
+getCurrentFunctionName = do
+  (CodeWriterState (f, _)) <- get
+  return f
+         
+setCurrentFunctionName :: String -> CodeWriter ()
+setCurrentFunctionName f = do
+  (CodeWriterState (_, n)) <- get
+  put $ CodeWriterState (f, n)
 
 getValueWithOffsetD :: String -> Int -> String
 getValueWithOffsetD s o = unlines ["@" ++ s
@@ -50,7 +62,8 @@ a <++> b = do
   return $ a' ++ b'
                
 compile :: HackVML -> String -> String
-compile (HackVML vml) filename = case runRWS (compile' vml) filename 0 of
+compile (HackVML vml) filename =
+    case runRWS (compile' vml) filename (CodeWriterState ("", 0)) of
                                    (s, _, _) -> s
     where
       compile' :: [HackVMCommand] -> CodeWriter String
@@ -110,15 +123,22 @@ arithmetic Or  = return $ popD ++ popM ++ "D=D|M\n" ++ pushD
 arithmetic Not = return $ popM ++ "D=!M\n" ++ pushD
 
 programFlow :: ProgramFlow -> CodeWriter String
-programFlow (Label  s) = return $ "(" ++ s ++ ")\n"
-programFlow (Goto   s) = return $ unlines ["@" ++ s, "0;JMP"]
-programFlow (IfGoto s) = return $ popD ++ unlines ["@" ++ s, "D;JNE"]
+programFlow (Label  s) = do
+  functionName <- getCurrentFunctionName
+  return $ "(" ++ functionName ++ "$" ++ s ++ ")\n"
+programFlow (Goto   s) = do
+  functionName <- getCurrentFunctionName
+  return $ unlines ["@" ++ functionName ++ "$" ++ s, "0;JMP"]
+programFlow (IfGoto s) = do
+  functionName <- getCurrentFunctionName
+  return $ popD ++ unlines ["@" ++ functionName ++ "$" ++ s, "D;JNE"]
                  
 functionCall :: FunctionCall -> CodeWriter String
 -- | function f k
 --     repeat k times:
 --     push 0            // Initialize local variables
-functionCall (Function f n) = programFlow (Label f) <++>
+functionCall (Function f n) = setCurrentFunctionName f >>
+                              programFlow (Label f) <++>
                               fmap concat (forM [0..n-1] $ \x ->
                                   return ("// Init " ++ show x ++ "\n") <++>
                                   stack (Push Constant 0) <++>
