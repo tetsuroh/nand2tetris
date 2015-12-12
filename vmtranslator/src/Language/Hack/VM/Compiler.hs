@@ -8,7 +8,7 @@ import Codec.Hack.Types (Jump(..))
 import Language.Hack.VM.Types
 import Language.Hack.VM.Parser (parseHackVM)
     
-newtype CodeWriterState = CodeWriterState (String, Int)
+newtype CodeWriterState = CodeWriterState (String, Int) deriving (Show)
     
 type CodeWriter a = RWS String () CodeWriterState a
 
@@ -60,11 +60,29 @@ a <++> b = do
   a' <- a
   b' <- b
   return $ a' ++ b'
-               
-compile :: HackVML -> String -> String
-compile (HackVML vml) filename =
-    case runRWS (compile' vml) filename (CodeWriterState ("", 0)) of
-                                   (s, _, _) -> s
+
+compile :: [(HackVML, String)] -> String
+compile sources = let asm = compiles (callSysInit:sources) 0
+                  in initCode ++ asm
+    where
+      compiles :: [(HackVML, String)] -> Int -> String
+      compiles [] _ = ""
+      compiles ((vml, filename):ss) n = let (c, n')  = compiler vml filename n
+                                            cs = compiles ss n'
+                                        in c ++ cs
+      initCode = unlines ["// init"
+                         ,"@256"
+                         ,"D=A"
+                         ,"@SP"
+                         ,"M=D"
+                         ,"@LCL"]
+      callSysInit = (HackVML [FunctionCall (Call "Sys.init" 0)], "bootstrap")
+
+                 
+compiler :: HackVML -> String -> Int -> (String, Int)
+compiler (HackVML vml) filename n =
+    case runRWS (compile' vml) filename (CodeWriterState ("", n)) of
+                                   (s, CodeWriterState (_, x), _) -> (s, x)
     where
       compile' :: [HackVMCommand] -> CodeWriter String
       compile' [] = return ""
@@ -82,7 +100,7 @@ stack (Push segment n) = push segment n
 stack (Pop  segment n) = pop  segment n
 
 push :: MemorySegment -> Int -> CodeWriter String
-push Constant n = return $ pushA n
+push Constant n = return $ pushC n
 push Pointer  n = return $ pushM $ show (baseAddress Pointer + n)
 push Temp     n = return $ pushM $ show (baseAddress Temp + n)
 push Static   n = getStaticVariableName n >>= return . pushM 
@@ -138,18 +156,47 @@ functionCall :: FunctionCall -> CodeWriter String
 --     repeat k times:
 --     push 0            // Initialize local variables
 functionCall (Function f n) = setCurrentFunctionName f >>
-                              programFlow (Label f) <++>
+                              return ("(" ++ f ++ ")\n") <++>
                               fmap concat (forM [0..n-1] $ \x ->
                                   return ("// Init " ++ show x ++ "\n") <++>
                                   stack (Push Constant 0) <++>
                                   stack (Pop Local x) <++>
                                   return (unlines ["@SP// incr", "M=M+1"])
                                           )
-functionCall (Call     f n) = undefined
+functionCall (Call     f n) = do returnLabel <- returnAddress
+                                 (return "// set return address \n" <++>
+                                  pushReturnAddress returnLabel <++>
+                                  pushLocal <++>
+                                  pushArgument <++>
+                                  pushThis <++>
+                                  pushThat <++>
+                                  setArgument <++>
+                                  setLocal <++>
+                                  gotoFunction <++>
+                                  labelReturnAddress returnLabel)
+    where
+      pushReturnAddress = return . pushA 
+      pushLocal         = return . pushM $ segmentToLabel Local
+      pushArgument      = return . pushM $ segmentToLabel Argument
+      pushThis          = return . pushM $ segmentToLabel This
+      pushThat          = return . pushM $ segmentToLabel That
+      setArgument       = return . unlines $ ["@SP"
+                                              ,"D=M"
+                                              ,"@" ++ show (n + 5)
+                                              ,"D=D-A"
+                                              ,"@ARG"
+                                              ,"M=D"]
+      setLocal           = return . unlines $ ["@SP"
+                                              ,"D=M"
+                                              ,"@LCL"
+                                              ,"M=D"]
+      gotoFunction       = return . unlines $ ["@" ++ f, "0;JMP"]
+      labelReturnAddress = return . (\l -> "(" ++ l ++ ")\n")
+      returnAddress      = (return . ("return-address"++) .  show) =<< getVariableCout
 functionCall Return         = return "// return \n" <++>
                               -- R13 = return address
                               getValueWithOffset (segmentToLabel Local) (-5) <++>
-                              storeValue "R13" <++>
+                              storeValue "R14" <++>
                               -- *ARG = pop() // pop result of function for callee
                               stack (Pop Argument 0) <++>
                               -- SP = ARG + 1
@@ -170,7 +217,7 @@ functionCall Return         = return "// return \n" <++>
                                          ,"D=M"
                                          ,"@SP"
                                          ,"M=D+1"]
-      gotoReturnAddress = getValueWithOffset "R13" 0 <++>
+      gotoReturnAddress = getValueWithOffset "R14" 0 <++>
                           return (unlines ["0;JMP"])
 
 segmentToLabel :: MemorySegment -> String
@@ -190,8 +237,13 @@ storeValueD :: String -> String
 storeValueD s = unlines ["@" ++ s
                        ,"M=D"]
 
-pushA :: Int -> String
-pushA n = unlines ["@" ++ show n
+pushA :: String -> String
+pushA l = unlines ["@" ++ l
+                  ,"D=A"
+                  ,init pushD]
+                
+pushC :: Int -> String
+pushC n = unlines ["@" ++ show n
                   ,"D=A"
                   ,init pushD]
                    
