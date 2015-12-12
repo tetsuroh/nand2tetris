@@ -1,10 +1,12 @@
+{-# LANGUAGE OverloadedStrings #-}
 module Language.Hack.VM.Parser where
 
-import Text.Parsec
+import Text.Parsec hiding (label)
 import Text.Parsec.String
 import Control.Applicative ((<$>), (<*>), (<*), (*>))
 
 import Language.Hack.VM.Types
+import Language.Hack.VM.Lexer (symbol)
 
 comment :: Parser ()
 comment = do
@@ -12,7 +14,11 @@ comment = do
   many $ noneOf "\n"
   char '\n'
   return ()
-    
+
+-- \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_
+-- Arithmetic commands
+-- \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_
+  
 add :: Parser ArithmeticCommand
 add = string "add" *> return Add
 
@@ -51,6 +57,10 @@ arithmeticCommand = try add <|>
                     Language.Hack.VM.Parser.or <|>
                     Language.Hack.VM.Parser.not
 
+-- \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_
+-- Stack commands
+-- \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_
+                            
 argument :: Parser MemorySegment
 argument = string "argument" >> return Argument
 
@@ -106,18 +116,79 @@ pop = do
 stackOperation :: Parser StackOperation
 stackOperation = try push <|> pop
 
+-- \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_
+-- Label commands
+-- \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_
+
+label :: Parser ProgramFlow
+label = do
+  string "label"
+  spaces
+  label_ <- symbol
+  return . Label $ label_
+
+goto :: Parser ProgramFlow
+goto = do
+  string "goto"
+  spaces
+  label_ <- symbol
+  return . Goto $ label_
+
+ifGoto :: Parser ProgramFlow
+ifGoto = do
+  string "if-goto"
+  spaces
+  label_ <- symbol
+  return . IfGoto $ label_
+
+programFlow :: Parser ProgramFlow
+programFlow = label <|> goto <|> ifGoto
+              
+-- \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_
+-- Function call commands
+-- \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_
+
+functionCall :: Parser FunctionCall
+functionCall = function <|> call <|> ret
+    where
+      function :: Parser FunctionCall
+      function = do
+        string "function"
+        spaces
+        functionName <- symbol
+        spaces
+        localVariableLength <- many1 digit
+        return $ Function functionName (read localVariableLength)
+
+      call :: Parser FunctionCall
+      call = do
+        string "call"
+        spaces
+        functionName <- symbol
+        spaces
+        argumentLength <- many1 digit
+        return $ Call functionName (read argumentLength)
+
+      ret :: Parser FunctionCall
+      ret = do
+        string "return"
+        return Return
+
+-- \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_
+-- Hack commands
+-- \_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_\_
+
 parserHackVM :: Parser [HackVMCommand]
 parserHackVM = do 
   skipMany spaceOrComment
-  sepEndBy (a <|> s) (skipMany spaceOrComment)
+  sepEndBy (a <|> p <|> f <|> s) (skipMany spaceOrComment)
       where
         spaceOrComment = (space >> return ()) <|> comment
-        a = do
-          ac <- try arithmeticCommand
-          return $ ArithmeticCommand ac
-        s = do
-          so <- stackOperation
-          return $ StackOperation so
+        a = ArithmeticCommand <$> try arithmeticCommand
+        p = ProgramFlow <$> try programFlow
+        f = FunctionCall <$> try functionCall
+        s = StackOperation <$> stackOperation
+
 
 parseHackVM :: String -> String -> Either ParseError HackVML
 parseHackVM n s = fmap HackVML $ parse parserHackVM n s
